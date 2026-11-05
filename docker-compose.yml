@@ -1,0 +1,51 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+
+  dht11-bridge:
+    build: ./bridge
+    container_name: dht11-bridge
+    restart: unless-stopped
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+    group_add:
+      - dialout
+    depends_on:
+      - mosquitto
+
+  mqtt-bridge:
+    build:
+      context: ./dashboard-next
+      dockerfile: Dockerfile.bridge
+    container_name: mqtt-bridge
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+
+  dashboard:
+    build: ./dashboard-next
+    container_name: dht11-dashboard
+    restart: unless-stopped
+    ports:
+      - "5860:5860"
+    depends_on:
+      - mqtt-bridge
+    environment:
+      - MQTT_BROKER_URL=http://mqtt-bridge:5000
+    labels:
+      - "casaos.enable=true"
+      - "casaos.name=TempWatch"
+      - "casaos.icon=https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/dht22.svg"
+      - "casaos.description=Real-time temperature monitoring dashboard"
+      - "casaos.port=5860"
+      - "casaos.webui=http://10.5.6.8:5860"
+
+volumes:
+  mosquitto_data:

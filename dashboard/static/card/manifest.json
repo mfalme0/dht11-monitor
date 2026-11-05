@@ -1,0 +1,9 @@
+{
+  "name": "DHT11 Not Boring Card",
+  "version": "1.0.0",
+  "description": "A weather-reactive card styled after Not Boring Weather for DHT11 sensors.",
+  "url": "https://github.com/local/dht11-not-boring",
+  "card": {
+    "dash": "dht11-not-boring.js"
+  }
+}

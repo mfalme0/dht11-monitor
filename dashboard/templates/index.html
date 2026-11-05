@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Living Room — Weather</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --glass-bg:rgba(255,255,255,0.08);
+  --glass-border:rgba(255,255,255,0.15);
+  --glass-blur:blur(24px) saturate(1.5);
+}
+html,body{
+  width:100%;height:100%;overflow:hidden;
+  font-family:-apple-system,'SF Pro Rounded','SF Pro Display','Inter',system-ui,sans-serif;
+  color:#fff;-webkit-font-smoothing:antialiased;user-select:none;
+}
+body{display:flex;align-items:center;justify-content:center;background:#000}
+canvas#scene{position:fixed;inset:0;width:100%;height:100%;z-index:0}
+.noise{
+  position:fixed;inset:0;z-index:1;pointer-events:none;opacity:0.035;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.wrap{
+  position:relative;z-index:2;width:100%;max-width:520px;height:100%;
+  display:flex;flex-direction:column;
+  padding:env(safe-area-inset-top,24px) 24px 20px;
+}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.top-label{font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;opacity:0.5}
+.top-dot{width:7px;height:7px;border-radius:50%;background:#34D399;box-shadow:0 0 10px rgba(52,211,153,0.7);transition:all .4s}
+.top-dot.off{background:#F97316;box-shadow:0 0 10px rgba(249,115,22,0.7);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.hero{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  position:relative;gap:2px;
+}
+.hero-temp{
+  font-size:clamp(100px,24vw,180px);font-weight:900;line-height:0.82;
+  letter-spacing:-5px;text-align:center;
+  text-shadow:0 8px 60px rgba(0,0,0,0.2);
+  position:relative;z-index:1;
+  cursor:pointer;
+}
+.hero-temp:active{transform:scale(0.97)}
+.hero-temp .deg{font-size:0.35em;font-weight:700;vertical-align:super;letter-spacing:0;margin-left:-3px;opacity:0.7}
+.hero-sub{font-size:20px;font-weight:600;opacity:0.75;text-shadow:0 2px 16px rgba(0,0,0,0.1);position:relative;z-index:1;letter-spacing:0.5px}
+.hero-range{font-size:15px;font-weight:500;opacity:0.45;margin-top:4px;position:relative;z-index:1;font-variant-numeric:tabular-nums}
+.orb-wrap{position:absolute;inset:-60px;pointer-events:none;z-index:0}
+.orb{position:absolute;border-radius:50%;filter:blur(1px)}
+.orb.a{width:200px;height:200px;top:5%;right:-15%;background:radial-gradient(circle at 30% 30%,rgba(96,165,250,0.35),rgba(96,165,250,0.05));animation:of 8s ease-in-out infinite}
+.orb.b{width:160px;height:160px;bottom:10%;left:-10%;background:radial-gradient(circle at 30% 30%,rgba(251,191,36,0.3),rgba(251,191,36,0.03));animation:of 11s ease-in-out infinite reverse}
+.orb.c{width:180px;height:180px;top:30%;left:50%;transform:translateX(-50%);background:radial-gradient(circle at 40% 35%,rgba(255,255,255,0.12),rgba(255,255,255,0.01));animation:of 13s ease-in-out infinite}
+@keyframes of{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(-12px,-18px) scale(1.04)}66%{transform:translate(8px,10px) scale(0.97)}}
+.bottom{padding-bottom:4px}
+.metrics{display:flex;gap:10px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none}
+.metrics::-webkit-scrollbar{display:none}
+.pill{
+  flex-shrink:0;padding:14px 18px;border-radius:20px;
+  backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  background:var(--glass-bg);border:1px solid var(--glass-border);
+  display:flex;align-items:center;gap:12px;
+  transition:transform .25s cubic-bezier(.34,1.56,.64,1);cursor:default;
+}
+.pill:active{transform:scale(0.95) translateY(1px)}
+.pill-icon{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;background:rgba(255,255,255,0.08)}
+.pill-data{display:flex;flex-direction:column;line-height:1.2}
+.pill-val{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.pill-lbl{font-size:10px;font-weight:600;opacity:0.45;text-transform:uppercase;letter-spacing:0.08em}
+.scrub-card{
+  border-radius:22px;padding:18px;
+  backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);
+  background:var(--glass-bg);border:1px solid var(--glass-border);
+}
+.scrub-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.scrub-title{font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;opacity:0.5}
+.scrub-time{font-size:12px;font-weight:600;opacity:0.6;font-variant-numeric:tabular-nums}
+.track{position:relative;width:100%;height:6px;border-radius:3px;background:rgba(255,255,255,0.12);cursor:pointer;touch-action:none}
+.track-fill{position:absolute;top:0;left:0;height:100%;border-radius:3px;background:linear-gradient(90deg,#60A5FA,#FBBF24,#FB923C);transition:width .12s ease-out}
+.track-handle{
+  position:absolute;top:50%;transform:translate(-50%,-50%);
+  width:24px;height:24px;border-radius:50%;background:#fff;
+  box-shadow:0 2px 16px rgba(0,0,0,0.3),0 0 0 4px rgba(255,255,255,0.15);
+  transition:transform .2s cubic-bezier(.34,1.56,.64,1);cursor:grab;
+}
+.track-handle:active{transform:translate(-50%,-50%) scale(1.3);cursor:grabbing}
+.hum-track{margin-top:12px;height:4px;border-radius:2px;background:rgba(255,255,255,0.08);overflow:hidden}
+.hum-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,rgba(96,165,250,0.3),#60A5FA,#60A5FA);transition:width .5s cubic-bezier(.22,1,.36,1);box-shadow:0 0 12px rgba(96,165,250,0.4)}
+.scrub-labels{display:flex;justify-content:space-between;margin-top:8px;font-size:10px;font-weight:600;opacity:0.35;font-variant-numeric:tabular-nums}
+.rain-container{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.rain-drop{position:absolute;width:1.5px;background:linear-gradient(180deg,transparent,rgba(96,165,250,0.5));border-radius:0 0 2px 2px;opacity:0;animation:fall linear infinite}
+@keyframes fall{0%{transform:translateY(-30px) rotate(8deg);opacity:0}8%{opacity:1}92%{opacity:0.8}100%{transform:translateY(calc(100vh + 30px)) rotate(8deg);opacity:0}}
+.sparkle{position:absolute;width:3px;height:3px;border-radius:50%;background:#fff;pointer-events:none;opacity:0;z-index:3}
+@keyframes shimmer{0%{opacity:0;transform:scale(0) rotate(0deg)}50%{opacity:1;transform:scale(1) rotate(180deg)}100%{opacity:0;transform:scale(0) rotate(360deg)}}
+.no-data{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .6s}
+.no-data.show{opacity:1;pointer-events:auto}
+.spinner{width:44px;height:44px;border:3px solid rgba(255,255,255,0.1);border-top-color:rgba(255,255,255,0.5);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.no-data-text{margin-top:16px;font-size:15px;font-weight:500;opacity:0.4}
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div class="noise"></div>
+<div class="rain-container" id="rain"></div>
+<div class="wrap">
+  <div class="top">
+    <span class="top-label">Living Room</span>
+    <div class="top-dot" id="dot"></div>
+  </div>
+  <div class="hero">
+    <div class="orb-wrap"><div class="orb a"></div><div class="orb b"></div><div class="orb c"></div></div>
+    <div class="hero-temp" id="hero-temp">--<span class="deg">°</span></div>
+    <div class="hero-sub" id="hero-cond">Waiting for data</div>
+    <div class="hero-range" id="hero-range"></div>
+    <div class="no-data show" id="no-data">
+      <div class="spinner"></div>
+      <div class="no-data-text">Connecting to sensor...</div>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="metrics">
+      <div class="pill"><div class="pill-icon">💧</div><div class="pill-data"><span class="pill-val" id="m-hum">--%</span><span class="pill-lbl">Humidity</span></div></div>
+      <div class="pill"><div class="pill-icon">🌡️</div><div class="pill-data"><span class="pill-val" id="m-dew">--°</span><span class="pill-lbl">Dew Point</span></div></div>
+      <div class="pill"><div class="pill-icon">🫁</div><div class="pill-data"><span class="pill-val" id="m-comf">--</span><span class="pill-lbl">Comfort</span></div></div>
+      <div class="pill"><div class="pill-icon">📈</div><div class="pill-data"><span class="pill-val" id="m-range">--</span><span class="pill-lbl">Today</span></div></div>
+    </div>
+    <div class="scrub-card">
+      <div class="scrub-top"><span class="scrub-title">Timeline</span><span class="scrub-time" id="scrub-time">Now</span></div>
+      <div class="track" id="track"><div class="track-fill" id="fill"></div><div class="track-handle" id="handle"></div></div>
+      <div class="hum-track"><div class="hum-fill" id="hbar"></div></div>
+      <div class="scrub-labels"><span>6h ago</span><span>3h ago</span><span>Now</span></div>
+    </div>
+  </div>
+</div>
+<script>
+const socket=io();
+let cur={t:null,h:null},hist=[],scrubPos=1,dragging=false;
+const canvas=document.getElementById('scene'),ctx=canvas.getContext('2d'),rainEl=document.getElementById('rain');
+let W,H;
+
+function resize(){const d=devicePixelRatio||1;W=window.innerWidth;H=window.innerHeight;canvas.width=W*d;canvas.height=H*d;canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(d,0,0,d,0,0)}
+window.addEventListener('resize',resize);resize();
+
+// ── TIME OF DAY ──
+function getTimeOfDay(){
+  const h=new Date().getHours(),m=new Date().getMinutes();
+  return h+m/60;
+}
+
+const TOD_STOPS=[
+  {t:0,   top:'#080E1A',bot:'#0D1B2A',cloud:0.03,sun:0,   star:1.0,  label:'night'},
+  {t:4.5, top:'#0C1525',bot:'#162240',cloud:0.04,sun:0,   star:0.8,  label:'night'},
+  {t:5.5, top:'#1A2744',bot:'#3D2B5A',cloud:0.06,sun:0,   star:0.3,  label:'dawn'},
+  {t:6.5, top:'#4A3060',bot:'#E8734A',cloud:0.10,sun:0.1, star:0,    label:'dawn'},
+  {t:7.5, top:'#6BA3D6',bot:'#F5C882',cloud:0.12,sun:0.5, star:0,    label:'sunrise'},
+  {t:9,   top:'#5BA3D9',bot:'#A8D8F0',cloud:0.12,sun:1.0, star:0,    label:'morning'},
+  {t:12,  top:'#4A9AD9',bot:'#87CEEB',cloud:0.10,sun:1.0, star:0,    label:'midday'},
+  {t:15,  top:'#5BA3D9',bot:'#B0D8F0',cloud:0.10,sun:0.9, star:0,    label:'afternoon'},
+  {t:17,  top:'#D98040',bot:'#F5A66E',cloud:0.10,sun:0.6, star:0,    label:'golden'},
+  {t:18.5,top:'#C0503A',bot:'#E8734A',cloud:0.09,sun:0.3, star:0,    label:'sunset'},
+  {t:19.5,top:'#3A2050',bot:'#D06040',cloud:0.07,sun:0.05,star:0.1,  label:'dusk'},
+  {t:20.5,top:'#151A30',bot:'#2A2050',cloud:0.05,sun:0,   star:0.6,  label:'evening'},
+  {t:22,  top:'#0A1020',bot:'#151A30',cloud:0.04,sun:0,   star:0.9,  label:'night'},
+  {t:24,  top:'#080E1A',bot:'#0D1B2A',cloud:0.03,sun:0,   star:1.0,  label:'night'},
+];
+
+function lerpHex(a,b,t){
+  const ah=parseInt(a.slice(1),16),bh=parseInt(b.slice(1),16);
+  const ar=(ah>>16)&0xff,ag=(ah>>8)&0xff,ab=ah&0xff;
+  const br=(bh>>16)&0xff,bg2=(bh>>8)&0xff,bb=bh&0xff;
+  const r=Math.round(ar+(br-ar)*t),g=Math.round(ag+(bg2-ag)*t),bl=Math.round(ab+(bb-ab)*t);
+  return'#'+((1<<24)+(r<<16)+(g<<8)+bl).toString(16).slice(1);
+}
+
+function getTodState(hod){
+  let a=TOD_STOPS[0],b=TOD_STOPS[1];
+  for(let i=0;i<TOD_STOPS.length-1;i++){
+    if(hod>=TOD_STOPS[i].t&&hod<=TOD_STOPS[i+1].t){a=TOD_STOPS[i];b=TOD_STOPS[i+1];break}
+  }
+  const range=b.t-a.t||1;
+  const p=(hod-a.t)/range;
+  return{
+    top:lerpHex(a.top,b.top,p),
+    bot:lerpHex(a.bot,b.bot,p),
+    cloudAlpha:a.cloud+(b.cloud-a.cloud)*p,
+    sunAlpha:a.sun+(b.sun-a.sun)*p,
+    starAlpha:a.star+(b.star-a.star)*p,
+  };
+}
+
+// ── STARS ──
+const stars=Array.from({length:80},()=>({
+  x:Math.random(),y:Math.random()*0.6,
+  r:0.5+Math.random()*1.5,
+  phase:Math.random()*Math.PI*2,
+  speed:0.5+Math.random()*2,
+}));
+
+function drawStars(t,tod){
+  if(tod.starAlpha<0.01)return;
+  ctx.save();
+  stars.forEach(s=>{
+    const twinkle=Math.sin(t*0.001*s.speed+s.phase)*0.3+0.7;
+    ctx.globalAlpha=tod.starAlpha*twinkle;
+    ctx.fillStyle='#fff';
+    ctx.beginPath();
+    ctx.arc(s.x*W,s.y*H,s.r,0,Math.PI*2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+// ── MOON ──
+function drawMoon(t,tod){
+  if(tod.starAlpha<0.1)return;
+  const x=W*0.15,y=H*0.08,r=22;
+  const glow=tod.starAlpha;
+  ctx.save();
+  ctx.globalAlpha=glow*0.15;
+  const mg=ctx.createRadialGradient(x,y,r*0.5,x,y,r*3);
+  mg.addColorStop(0,'rgba(200,220,255,0.5)');mg.addColorStop(1,'transparent');
+  ctx.fillStyle=mg;ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=glow*0.9;
+  ctx.fillStyle='#D8E8F8';
+  ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  ctx.globalAlpha=glow*0.6;
+  ctx.fillStyle='#0C1525';
+  ctx.beginPath();ctx.arc(x-r*0.3,y-r*0.1,r*0.75,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+}
+
+// ── SUN ──
+function drawSun(time,tod){
+  if(tod.sunAlpha<0.01)return;
+  const hod=getTimeOfDay();
+  const sunAngle=((hod-6)/12)*Math.PI;
+  const sx=W*0.15+W*0.7*(hod-6)/12;
+  const sy=H*0.55-H*0.55*Math.sin(sunAngle);
+  const pulse=Math.sin(time*0.0008)*0.1+0.9;
+  ctx.save();
+  ctx.globalAlpha=tod.sunAlpha*0.25*pulse;
+  const g=ctx.createRadialGradient(sx,sy,0,sx,sy,180);
+  g.addColorStop(0,'rgba(255,220,100,0.9)');g.addColorStop(0.25,'rgba(255,180,50,0.4)');
+  g.addColorStop(0.6,'rgba(255,150,30,0.08)');g.addColorStop(1,'transparent');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=tod.sunAlpha*0.05*pulse;
+  ctx.strokeStyle='#FFD700';ctx.lineWidth=1.5;
+  for(let i=0;i<12;i++){
+    const a=(i/12)*Math.PI*2+time*0.00015;
+    const r2=100+Math.sin(time*0.003+i)*25;
+    ctx.beginPath();ctx.moveTo(sx+Math.cos(a)*40,sy+Math.sin(a)*40);
+    ctx.lineTo(sx+Math.cos(a)*r2,sy+Math.sin(a)*r2);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ── CLOUDS ──
+class Cloud{
+  constructor(){this.reset(true)}
+  reset(init){
+    this.x=init?Math.random()*(W+400)-200:W+200;
+    this.y=H*0.06+Math.random()*H*0.25;
+    this.w=80+Math.random()*140;this.h=24+Math.random()*30;
+    this.speed=0.15+Math.random()*0.4;
+    this.baseAlpha=0.06+Math.random()*0.14;
+    this.depth=0.5+Math.random()*0.5;
+  }
+  update(){this.x-=this.speed*this.depth;if(this.x<-this.w-50)this.reset(false)}
+  draw(ctx,t,tod){
+    const isNight=tod.starAlpha>0.3;
+    ctx.save();
+    ctx.globalAlpha=this.baseAlpha*(isNight?0.3:1)*Math.max(tod.cloudAlpha/0.12,0.3);
+    ctx.fillStyle=isNight?'#8090B0':'#fff';
+    const y=this.y+Math.sin(t*0.0005+this.x*0.01)*3;
+    ctx.beginPath();ctx.ellipse(this.x,y,this.w,this.h,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(this.x-this.w*0.35,y+this.h*0.35,this.w*0.65,this.h*0.65,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(this.x+this.w*0.35,y+this.h*0.2,this.w*0.55,this.h*0.55,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(this.x-this.w*0.1,y-this.h*0.3,this.w*0.45,this.h*0.5,0,0,Math.PI*2);ctx.fill();
+    ctx.restore();
+  }
+}
+const clouds=Array.from({length:12},()=>new Cloud());
+
+// ── RAIN ──
+const rainDrops=[];
+function initRain(){rainEl.innerHTML='';for(let i=0;i<60;i++){const d=document.createElement('div');d.className='rain-drop';d.style.left=Math.random()*100+'%';d.style.height=(10+Math.random()*20)+'px';d.style.animationDuration=(0.5+Math.random()*0.6)+'s';d.style.animationDelay=Math.random()*2+'s';rainEl.appendChild(d);rainDrops.push(d)}}
+initRain();
+function updateRain(h){
+  const show=h>40,intensity=Math.min((h-40)/60,1),vis=Math.floor(rainDrops.length*intensity);
+  rainDrops.forEach((d,i)=>{const on=show&&i<vis;d.style.opacity=on?'1':'0';d.style.animationPlayState=on?'running':'paused'});
+}
+
+// ── SKY (time-of-day + temp blend) ──
+function getTempShift(t){
+  if(t===null)return{top:'#00000000',bot:'#00000000',a:0};
+  if(t<5)return{top:'#2C3E6B',bot:'#1A2744',a:0.2};
+  if(t<12)return{top:'#5B7FA5',bot:'#8BA5BE',a:0.15};
+  if(t<20)return{top:'#6AAFE0',bot:'#A8D8F0',a:0.1};
+  if(t<26)return{top:'#4A9AD9',bot:'#7EC8E3',a:0};
+  if(t<32)return{top:'#E8734A',bot:'#F5A66E',a:0.15};
+  if(t<38)return{top:'#D94F3B',bot:'#E8874A',a:0.25};
+  return{top:'#B71C1C',bot:'#E53935',a:0.35};
+}
+
+function blendColor(base,overlay,a){
+  if(a<0.01)return base;
+  const bh=parseInt(base.slice(1),16),oh=parseInt(overlay.slice(1),16);
+  const br=(bh>>16)&0xff,bg=(bh>>8)&0xff,bb=bh&0xff;
+  const or2=(oh>>16)&0xff,og=(oh>>8)&0xff,ob=oh&0xff;
+  const r=Math.round(br+(or2-br)*a),g=Math.round(bg+(og-bg)*a),b2=Math.round(bb+(ob-bb)*a);
+  return'#'+((1<<24)+(r<<16)+(g<<8)+b2).toString(16).slice(1);
+}
+
+// ── RENDER ──
+function drawBg(time){
+  const hod=getTimeOfDay();
+  const tod=getTodState(hod);
+  const temp=getTempShift(cur.t);
+  const topCol=blendColor(tod.top,temp.top,temp.a);
+  const botCol=blendColor(tod.bot,temp.bot,temp.a);
+  const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,topCol);g.addColorStop(1,botCol);
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  drawStars(time,tod);
+  drawMoon(time,tod);
+  drawSun(time,tod);
+  clouds.forEach(c=>{c.update();c.draw(ctx,time,tod)});
+}
+function loop(t){drawBg(t);requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+
+document.querySelector('.hero-temp').addEventListener('click',e=>{
+  for(let i=0;i<8;i++){
+    const s=document.createElement('div');s.className='sparkle';
+    s.style.left=e.clientX+'px';s.style.top=e.clientY+'px';
+    s.style.animation=`shimmer ${0.4+Math.random()*0.3}s ease-out forwards`;
+    s.style.animationDelay=Math.random()*0.1+'s';
+    document.body.appendChild(s);setTimeout(()=>s.remove(),800);
+  }
+});
+
+function dewPt(t,h){const a=17.27,b=237.7;const v=(a*t)/(b+t)+Math.log(h/100);return(b*v)/(a-v)}
+function comfort(h,t){if(h<30)return'Dry';if(h<=60&&t>=18&&t<=26)return'Ideal';if(h<=70)return'OK';if(h>80)return'Muggy';return'Humid'}
+function fmtTime(ts){return new Date(ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+
+let springTarget=null,springCur=1,springVel=0;
+function springTick(){
+  if(springTarget===null)return;
+  const diff=springTarget-springCur;springVel+=diff*0.15;springVel*=0.7;springCur+=springVel;
+  document.querySelector('.hero-temp').style.transform=`scale(${springCur})`;
+  if(Math.abs(diff)<0.001&&Math.abs(springVel)<0.001){springTarget=null;springCur=1;springVel=0;document.querySelector('.hero-temp').style.transform='scale(1)'}
+  requestAnimationFrame(springTick);
+}
+
+function updateUI(t,h){
+  const nd=document.getElementById('no-data');
+  if(t===null){nd.classList.add('show');return}
+  nd.classList.remove('show');
+  const ht=document.getElementById('hero-temp'),prev=parseInt(ht.textContent)||0;
+  ht.innerHTML=Math.round(t)+'<span class="deg">°</span>';
+  if(prev!==Math.round(t)){springTarget=1.08;springCur=1;springVel=0;springTick()}
+  document.getElementById('m-hum').textContent=Math.round(h)+'%';
+  document.getElementById('m-dew').textContent=Math.round(dewPt(t,h))+'°';
+  document.getElementById('m-comf').textContent=comfort(h,t);
+  document.getElementById('hbar').style.width=h+'%';
+  if(hist.length>1){
+    const temps=hist.map(x=>x.temperature).filter(x=>x!==null);
+    const hi=Math.max(...temps),lo=Math.min(...temps);
+    document.getElementById('hero-range').textContent='H:'+Math.round(hi)+'°  L:'+Math.round(lo)+'°';
+    document.getElementById('m-range').textContent=Math.round(lo)+'°/'+Math.round(hi)+'°';
+  }
+  let c='Comfortable';if(h>80)c='Muggy';else if(h>60)c='Mild';else if(h<=25)c='Dry';
+  if(t>33)c='Hot';if(t<5)c='Cold';
+  document.getElementById('hero-cond').textContent=c;
+  updateRain(h);
+}
+
+function updateScrub(){
+  if(hist.length<2)return;
+  const pct=scrubPos*100;
+  document.getElementById('fill').style.width=pct+'%';
+  document.getElementById('handle').style.left=pct+'%';
+  const idx=Math.floor(scrubPos*(hist.length-1)),e=hist[idx];
+  document.getElementById('scrub-time').textContent=scrubPos>=0.99?'Now':fmtTime(e.timestamp);
+  if(e)updateUI(e.temperature,e.humidity);
+}
+
+const track=document.getElementById('track'),handle=document.getElementById('handle');
+function sStart(e){dragging=true;sMove(e)}
+function sMove(e){if(!dragging)return;const r=track.getBoundingClientRect();const x=e.touches?e.touches[0].clientX:e.clientX;scrubPos=Math.max(0,Math.min(1,(x-r.left)/r.width));updateScrub()}
+function sEnd(){if(!dragging)return;dragging=false;if(scrubPos>0.98){scrubPos=1;if(cur.t!==null)updateUI(cur.t,cur.h);updateScrub()}}
+track.addEventListener('mousedown',sStart);handle.addEventListener('mousedown',sStart);
+document.addEventListener('mousemove',sMove);document.addEventListener('mouseup',sEnd);
+track.addEventListener('touchstart',sStart,{passive:true});handle.addEventListener('touchstart',sStart,{passive:true});
+document.addEventListener('touchmove',sMove,{passive:true});document.addEventListener('touchend',sEnd);
+
+socket.on('connect',()=>document.getElementById('dot').classList.remove('off'));
+socket.on('disconnect',()=>document.getElementById('dot').classList.add('off'));
+socket.on('sensor_update',d=>{
+  hist.push(d);if(hist.length>720)hist.shift();
+  cur.t=d.temperature;cur.h=d.humidity;
+  if(scrubPos>=0.98||hist.length<=2){scrubPos=1;updateUI(d.temperature,d.humidity);updateScrub()}
+  else updateScrub();
+});
+
+fetch('/api/history').then(r=>r.json()).then(data=>{
+  if(data.length>0){hist=data;const l=data[data.length-1];cur.t=l.temperature;cur.h=l.humidity;updateUI(cur.t,cur.h);scrubPos=1;updateScrub()}
+});
+</script>
+</body>
+</html>
